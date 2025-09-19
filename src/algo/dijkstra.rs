@@ -1,14 +1,104 @@
+use crate::algo::Measure;
+use crate::scored::MinScored;
+use crate::visit::{EdgeRef, GraphBase, IntoEdges, IntoEdgesDirected, VisitMap, Visitable};
+use crate::Direction;
 use alloc::collections::BinaryHeap;
 use core::hash::Hash;
 use hashbrown::hash_map::{
     Entry::{Occupied, Vacant},
     HashMap,
 };
+use hashbrown::HashSet;
 
-use crate::algo::Measure;
-use crate::scored::MinScored;
-use crate::visit::{EdgeRef, IntoEdges, IntoEdgesDirected, VisitMap, Visitable};
-use crate::Direction;
+pub struct Dijkstra<N, C, FN, IN, FG>
+where
+    N: Eq + Hash,
+    C: Measure + Copy,
+    FN: FnMut(&N) -> IN,
+    IN: IntoIterator<Item = (N, C)>,
+    FG: FnMut(&N) -> bool,
+{
+    start: N,
+    neighbors: FN,
+    goal: FG,
+    pub distances: HashMap<N, C>,
+}
+
+impl<N, C, FN, IN, FG> Dijkstra<N, C, FN, IN, FG>
+where
+    N: Eq + Hash + Copy,
+    C: Measure + Copy,
+    FN: FnMut(&N) -> IN,
+    IN: IntoIterator<Item = (N, C)>,
+    FG: FnMut(&N) -> bool,
+{
+    pub fn run(&mut self) {
+        let mut visited = HashSet::new();
+        let mut visit_next = BinaryHeap::new();
+        let zero_score = C::default();
+        self.distances.insert(self.start, zero_score);
+        visit_next.push(MinScored(zero_score, self.start));
+        let mut goal_node = None;
+        while let Some(MinScored(node_score, node)) = visit_next.pop() {
+            if visited.contains(&node) {
+                continue;
+            }
+            if (self.goal)(&node) {
+                goal_node = Some(node);
+                break;
+            }
+            for (next, next_cost) in (self.neighbors)(&node) {
+                if visited.contains(&next) {
+                    continue;
+                }
+                let next_score = node_score + next_cost;
+                match self.distances.entry(next) {
+                    Occupied(ent) => {
+                        if next_score < *ent.get() {
+                            *ent.into_mut() = next_score;
+                            visit_next.push(MinScored(next_score, next));
+                            //predecessor.insert(next.clone(), node.clone());
+                        }
+                    }
+                    Vacant(ent) => {
+                        ent.insert(next_score);
+                        visit_next.push(MinScored(next_score, next));
+                        //predecessor.insert(next.clone(), node.clone());
+                    }
+                }
+            }
+            visited.insert(node);
+        }
+    }
+}
+
+pub fn new_from_graph<G, FC, N, C, IN>(
+    graph: G,
+    start: G::NodeId,
+    goal: G::NodeId,
+    edge_cost: FC,
+) -> Dijkstra<N, C, impl FnMut(&N) -> IN, IN, impl FnMut(&N) -> bool>
+where
+    G: IntoEdges + Visitable,
+    G: GraphBase<NodeId = N>,
+    G::NodeId: Eq + Hash,
+    FC: FnMut(G::EdgeRef) -> C,
+    C: Measure + Copy,
+    IN: core::iter::Iterator,
+{
+    let neighbors = move |node: &G::NodeId| {
+        graph
+            .edges(*node)
+            .map(|edge| (edge.target(), edge_cost(edge)))
+    };
+    let goal_fn = move |node: &G::NodeId| *node == goal;
+    Dijkstra {
+        start,
+        neighbors,
+        goal: goal_fn,
+        distances: HashMap::new(),
+    }
+}
 
 /// Dijkstra's shortest path algorithm.
 ///
