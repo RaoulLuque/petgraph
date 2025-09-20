@@ -1,6 +1,6 @@
 use crate::algo::Measure;
 use crate::scored::MinScored;
-use crate::visit::{EdgeRef, GraphBase, IntoEdges, IntoEdgesDirected, VisitMap, Visitable};
+use crate::visit::{EdgeRef, IntoEdges, IntoEdgesDirected, VisitMap, Visitable};
 use crate::Direction;
 use alloc::collections::BinaryHeap;
 use core::hash::Hash;
@@ -10,36 +10,36 @@ use hashbrown::hash_map::{
 };
 use hashbrown::HashSet;
 
-pub struct Dijkstra<N, C, FN, IN, FC, FG>
+pub struct Dijkstra<N, FG, FN, IN, FC, C>
 where
     N: Eq + Hash,
-    C: Measure + Copy,
+    FG: FnMut(&N) -> bool,
     FN: FnMut(&N) -> IN,
     IN: IntoIterator<Item = N>,
     FC: FnMut(&N, &N) -> C,
-    FG: FnMut(&N) -> bool,
+    C: Measure + Copy,
 {
     start: N,
+    goal: FG,
     neighbors: FN,
     edge_cost: FC,
-    goal: FG,
     pub distances: HashMap<N, C>,
 }
 
-impl<N, C, FN, IN, FC, FG> Dijkstra<N, C, FN, IN, FC, FG>
+impl<N, C, FN, IN, FC, FG> Dijkstra<N, FG, FN, IN, FC, C>
 where
     N: Eq + Hash + Copy,
-    C: Measure + Copy,
+    FG: FnMut(&N) -> bool,
     FN: FnMut(&N) -> IN,
     IN: IntoIterator<Item = N>,
     FC: FnMut(&N, &N) -> C,
-    FG: FnMut(&N) -> bool,
+    C: Measure + Copy,
 {
     pub fn new_from_closures(
         start: N,
+        goal: FG,
         neighbors: FN,
         edge_cost: FC,
-        goal: FG,
     ) -> Self {
         Self {
             start,
@@ -50,7 +50,7 @@ where
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Option<C> {
         let mut visited = HashSet::new();
         let mut visit_next = BinaryHeap::new();
         let zero_score = C::default();
@@ -88,6 +88,11 @@ where
             }
             visited.insert(node);
         }
+        if let Some(goal_node) = goal_node {
+            Some(self.distances[&goal_node])
+        } else {
+            None
+        }
     }
 }
 
@@ -112,22 +117,23 @@ where
     }
 }
 
-pub fn new_from_graph<G, FC, C>(
+pub fn new_from_graph<G, FG, FC, C>(
     graph: G,
     start: G::NodeId,
-    goal: G::NodeId,
+    goal: FG,
     mut edge_cost: FC,
 ) -> Dijkstra<
     G::NodeId,
-    C,
+    FG,
     impl FnMut(&G::NodeId) -> DijkstraNeighborIterator<G>,
     DijkstraNeighborIterator<G>,
     impl FnMut(&G::NodeId, &G::NodeId) -> C,
-    impl FnMut(&G::NodeId) -> bool,
+    C,
 >
 where
     G: IntoEdges + Visitable,
     G::NodeId: Eq + Hash,
+    FG: FnMut(&G::NodeId) -> bool,
     FC: FnMut(G::EdgeRef) -> C,
     C: Measure + Copy,
 {
@@ -146,8 +152,7 @@ where
         }
         cost.expect("Edge not found")
     };
-    let goal_fn = move |node: &G::NodeId| *node == goal;
-    Dijkstra::new_from_closures(start, neighbors, edge_cost, goal_fn)
+    Dijkstra::new_from_closures(start, goal, neighbors, edge_cost)
 }
 
 /// Dijkstra's shortest path algorithm.
