@@ -35,12 +35,7 @@ where
     FC: FnMut(&N, &N) -> C,
     C: Measure + Copy,
 {
-    pub fn new_from_closures(
-        start: N,
-        goal: FG,
-        neighbors: FN,
-        edge_cost: FC,
-    ) -> Self {
+    pub fn new_from_closures(start: N, goal: FG, neighbors: FN, edge_cost: FC) -> Self {
         Self {
             start,
             neighbors,
@@ -96,6 +91,63 @@ where
     }
 }
 
+pub struct NeverUsed<N> {
+    _marker: core::marker::PhantomData<N>,
+}
+
+impl<N> IntoIterator for NeverUsed<N> {
+    type Item = N;
+    type IntoIter = core::iter::Empty<N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        core::iter::empty()
+    }
+}
+
+impl<N, C, FG> Dijkstra<N, FG, fn(&N) -> NeverUsed<N>, NeverUsed<N>, fn(&N, &N) -> C, C>
+where
+    N: Eq + Hash + Copy,
+    FG: FnMut(&N) -> bool,
+
+    C: Measure + Copy,
+{
+    pub fn new_from_graph<G, FCG>(
+        graph: G,
+        start: G::NodeId,
+        goal: FG,
+        mut edge_cost: FCG,
+    ) -> Dijkstra<
+        G::NodeId,
+        FG,
+        impl FnMut(&G::NodeId) -> DijkstraNeighborIterator<G>,
+        DijkstraNeighborIterator<G>,
+        impl FnMut(&G::NodeId, &G::NodeId) -> C,
+        C,
+    >
+    where
+        G: IntoEdges + Visitable,
+        G::NodeId: Eq + Hash,
+        FG: FnMut(&G::NodeId) -> bool,
+        FCG: FnMut(G::EdgeRef) -> C,
+        C: Measure + Copy,
+    {
+        let neighbors = move |node: &G::NodeId| DijkstraNeighborIterator {
+            edges: graph.edges(*node),
+        };
+        let edge_cost = move |start: &G::NodeId, end: &G::NodeId| {
+            let mut cost = None;
+            for edge in graph.edges(*start) {
+                if edge.target() == *end {
+                    cost = Some(edge_cost(edge));
+                    break;
+                }
+            }
+            cost.expect("Edge not found")
+        };
+        Dijkstra::new_from_closures(start, goal, neighbors, edge_cost)
+    }
+}
+
 pub struct DijkstraNeighborIterator<G>
 where
     G: IntoEdges,
@@ -115,44 +167,6 @@ where
             None => None,
         }
     }
-}
-
-pub fn new_from_graph<G, FG, FC, C>(
-    graph: G,
-    start: G::NodeId,
-    goal: FG,
-    mut edge_cost: FC,
-) -> Dijkstra<
-    G::NodeId,
-    FG,
-    impl FnMut(&G::NodeId) -> DijkstraNeighborIterator<G>,
-    DijkstraNeighborIterator<G>,
-    impl FnMut(&G::NodeId, &G::NodeId) -> C,
-    C,
->
-where
-    G: IntoEdges + Visitable,
-    G::NodeId: Eq + Hash,
-    FG: FnMut(&G::NodeId) -> bool,
-    FC: FnMut(G::EdgeRef) -> C,
-    C: Measure + Copy,
-{
-    let neighbors = move |node: &G::NodeId| {
-            DijkstraNeighborIterator {
-                edges: graph.edges(*node),
-            }
-    };
-    let edge_cost = move | start: &G::NodeId, end: &G::NodeId | {
-        let mut cost = None;
-        for edge in graph.edges(*start) {
-            if edge.target() == *end {
-                cost = Some(edge_cost(edge));
-                break;
-            }
-        }
-        cost.expect("Edge not found")
-    };
-    Dijkstra::new_from_closures(start, goal, neighbors, edge_cost)
 }
 
 /// Dijkstra's shortest path algorithm.
