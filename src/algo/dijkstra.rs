@@ -32,8 +32,8 @@ where
     N: Eq + Hash,
     C: Measure + Copy,
 {
-    path: Option<Vec<N>>,
-    cost: Option<C>,
+    paths: HashMap<N, Vec<N>>,
+    distances: HashMap<N, C>,
 }
 
 impl<N, C, FN, IN, FC, FG> Dijkstra<N, FG, FN, IN, FC, C>
@@ -93,16 +93,9 @@ where
             }
             visited.insert(node);
         }
-        if let Some(goal_node) = goal_node {
-            DijkstraResult {
-                path: None,
-                cost: Some(self.distances[&goal_node]),
-            }
-        } else {
-            DijkstraResult {
-                path: None,
-                cost: None,
-            }
+        DijkstraResult {
+            paths: HashMap::new(),
+            distances: self.distances.clone(),
         }
     }
 }
@@ -194,16 +187,8 @@ where
     N: Eq + Hash,
     C: Measure + Copy,
 {
-    pub fn path_as_vec(&self) -> Option<&Vec<N>> {
-        self.path.as_ref()
-    }
-
-    pub fn path_as_slice(&self) -> Option<&[N]> {
-        self.path.as_deref()
-    }
-
-    pub fn cost(&self) -> Option<C> {
-        self.cost
+    pub fn path_as_hashmap(&self) -> &HashMap<N, Vec<N>> {
+        &self.paths
     }
 }
 
@@ -294,7 +279,10 @@ where
     F: FnMut(G::EdgeRef) -> K,
     K: Measure + Copy,
 {
-    with_dynamic_goal(graph, start, |node| goal.as_ref() == Some(node), edge_cost).scores
+    let goal = |node: &G::NodeId| goal.as_ref() == Some(node);
+    Dijkstra::new_from_graph(graph, start, goal, edge_cost)
+        .run()
+        .distances
 }
 
 /// Return value of [`with_dynamic_goal`].
