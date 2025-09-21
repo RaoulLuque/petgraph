@@ -3,6 +3,7 @@ use crate::scored::MinScored;
 use crate::visit::{EdgeRef, IntoEdges, IntoEdgesDirected, VisitMap, Visitable};
 use crate::Direction;
 use alloc::collections::BinaryHeap;
+use alloc::vec::Vec;
 use core::hash::Hash;
 use hashbrown::hash_map::{
     Entry::{Occupied, Vacant},
@@ -23,7 +24,16 @@ where
     goal: FG,
     neighbors: FN,
     edge_cost: FC,
-    pub distances: HashMap<N, C>,
+    distances: HashMap<N, C>,
+}
+
+pub struct DijkstraResult<N, C>
+where
+    N: Eq + Hash,
+    C: Measure + Copy,
+{
+    path: Option<Vec<N>>,
+    cost: Option<C>,
 }
 
 impl<N, C, FN, IN, FC, FG> Dijkstra<N, FG, FN, IN, FC, C>
@@ -45,7 +55,7 @@ where
         }
     }
 
-    pub fn run(&mut self) -> Option<C> {
+    pub fn run(&mut self) -> DijkstraResult<N, C> {
         let mut visited = HashSet::new();
         let mut visit_next = BinaryHeap::new();
         let zero_score = C::default();
@@ -84,18 +94,27 @@ where
             visited.insert(node);
         }
         if let Some(goal_node) = goal_node {
-            Some(self.distances[&goal_node])
+            DijkstraResult {
+                path: None,
+                cost: Some(self.distances[&goal_node]),
+            }
         } else {
-            None
+            DijkstraResult {
+                path: None,
+                cost: None,
+            }
         }
     }
 }
 
-pub struct NeverUsed<N> {
+#[doc(hidden)]
+/// A marker type used for `Dijkstra::new_from_graph` to provide for the `neighbors` type parameter.
+pub struct DijkstraMarkerType<N> {
     _marker: core::marker::PhantomData<N>,
 }
 
-impl<N> IntoIterator for NeverUsed<N> {
+#[doc(hidden)]
+impl<N> IntoIterator for DijkstraMarkerType<N> {
     type Item = N;
     type IntoIter = core::iter::Empty<N>;
 
@@ -104,7 +123,29 @@ impl<N> IntoIterator for NeverUsed<N> {
     }
 }
 
-impl<N, C, FG> Dijkstra<N, FG, fn(&N) -> NeverUsed<N>, NeverUsed<N>, fn(&N, &N) -> C, C>
+pub struct DijkstraNeighborIterator<G>
+where
+    G: IntoEdges,
+{
+    edges: G::Edges,
+}
+
+impl<G> Iterator for DijkstraNeighborIterator<G>
+where
+    G: IntoEdges,
+{
+    type Item = G::NodeId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.edges.next() {
+            Some(edge_red) => Some(edge_red.target()),
+            None => None,
+        }
+    }
+}
+
+impl<N, C, FG>
+    Dijkstra<N, FG, fn(&N) -> DijkstraMarkerType<N>, DijkstraMarkerType<N>, fn(&N, &N) -> C, C>
 where
     N: Eq + Hash + Copy,
     FG: FnMut(&N) -> bool,
@@ -148,24 +189,21 @@ where
     }
 }
 
-pub struct DijkstraNeighborIterator<G>
+impl<N, C> DijkstraResult<N, C>
 where
-    G: IntoEdges,
+    N: Eq + Hash,
+    C: Measure + Copy,
 {
-    edges: G::Edges,
-}
+    pub fn path_as_vec(&self) -> Option<&Vec<N>> {
+        self.path.as_ref()
+    }
 
-impl<G> Iterator for DijkstraNeighborIterator<G>
-where
-    G: IntoEdges,
-{
-    type Item = G::NodeId;
+    pub fn path_as_slice(&self) -> Option<&[N]> {
+        self.path.as_deref()
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.edges.next() {
-            Some(edge_red) => Some(edge_red.target()),
-            None => None,
-        }
+    pub fn cost(&self) -> Option<C> {
+        self.cost
     }
 }
 
